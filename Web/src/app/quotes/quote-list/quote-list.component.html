@@ -1,0 +1,6 @@
+<ul>
+    <li *ngFor="let quote of quotes">
+        <span>{{quote.Id}}</span> &nbsp;
+        <button (click)="goTo(quote.Id)">Go!</button>
+    </li>
+</ul>

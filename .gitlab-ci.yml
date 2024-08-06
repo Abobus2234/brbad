@@ -1,0 +1,66 @@
+variables: 
+  DOCKER_REGISTRY: xxx.dkr.ecr.eu-west-3.amazonaws.com
+  AWS_DEFAULT_REGION: eu-west-3
+  API_APP_NAME: brbad-api
+  WEB_APP_NAME: brbad-web
+  EXECUTION_ROLE_ARN: arn:aws:iam::xxx:role/ecsTaskExecutionRole
+
+stages:
+  - build
+  - deploy
+
+before_script:
+  - export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+  - export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+  - export WEB_ENVIRONMENT=$WEB_ENVIRONMENT
+  - docker context create ecs ${DOCKER_CTX} --from-env || true
+  - docker context use default
+  - aws ecr get-login-password --region eu-west-3 | docker login --username AWS --password-stdin $DOCKER_REGISTRY
+
+.build-push-web:
+  services:
+    - docker:dind
+  script:
+    - docker build --build-arg WEB_ENVIRONMENT=$WEB_ENVIRONMENT -f Web.Dockerfile -t $DOCKER_REGISTRY/$WEB_APP_NAME:$CI_PIPELINE_IID  .
+    - docker push $DOCKER_REGISTRY/$WEB_APP_NAME:$CI_PIPELINE_IID
+    - docker image prune -a --force
+
+.build-push-api:
+  services:
+    - docker:dind
+  script:
+    - docker build -f Api.Dockerfile -t $DOCKER_REGISTRY/$API_APP_NAME:$CI_PIPELINE_IID  .
+    - docker push $DOCKER_REGISTRY/$API_APP_NAME:$CI_PIPELINE_IID
+    - docker image prune -a --force
+
+Build Api Production: 
+  extends: .build-push-api
+  stage: build
+  environment: production
+  only:
+    - master
+
+Build Web Production: 
+  extends: .build-push-web
+  stage: build
+  environment: production
+  only:
+    - master
+
+.deploy:
+  image: aws-cli
+  stage: deploy
+  script:
+    - task_definition_arn_web=$(aws ecs register-task-definition --family brbad-web-task-family --container-definitions "[{\"name\":\"brbad-web-container\",\"image\":\"$DOCKER_REGISTRY/$WEB_APP_NAME:$CI_PIPELINE_IID\",\"cpu\":0,\"essential\":true,\"portMappings\":[{\"name\":\"brbad-web-port\",\"containerPort\":80,\"hostPort\":80,\"protocol\":\"tcp\",\"appProtocol\":\"http\"}]}]" --execution-role-arn $EXECUTION_ROLE_ARN --network-mode awsvpc --requires-compatibilities FARGATE --cpu 1024 --memory 3072 --runtime-platform cpuArchitecture=X86_64,operatingSystemFamily=LINUX --query 'taskDefinition.taskDefinitionArn' --output text)
+    - task_definition_arn_api=$(aws ecs register-task-definition --family brbad-api-task-family --container-definitions "[{\"name\":\"brbad-api-container\",\"image\":\"$DOCKER_REGISTRY/$API_APP_NAME:$CI_PIPELINE_IID\",\"cpu\":0,\"essential\":true,\"portMappings\":[{\"name\":\"brbad-api-port\",\"containerPort\":3000,\"hostPort\":3000,\"protocol\":\"tcp\",\"appProtocol\":\"http\"}]}]" --execution-role-arn $EXECUTION_ROLE_ARN --network-mode awsvpc --requires-compatibilities FARGATE --cpu 1024 --memory 3072 --runtime-platform cpuArchitecture=X86_64,operatingSystemFamily=LINUX --query 'taskDefinition.taskDefinitionArn' --output text)
+    - aws ecs update-service --cluster brbad-cluster-production --service brbad-web-service --task-definition $task_definition_arn_web
+    - aws ecs update-service --cluster brbad-cluster-production --service brbad-api-service-latest --task-definition $task_definition_arn_api --desired-count 3
+    - aws ecs wait services-stable --cluster brbad-cluster-production --services brbad-web-service brbad-api-service-latest
+
+Deploy to Production: 
+  extends: .deploy
+  stage: deploy
+  when: manual
+  environment: production
+  only:
+    - master

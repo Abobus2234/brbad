@@ -1,0 +1,14 @@
+.logo-wrap {
+    display: flex;
+    align-items: center;
+}
+
+.logo-wrap img {
+    height: 40px;
+    margin-right: 10px;
+} 
+
+body {
+    background-color: black;
+    color: white;
+}

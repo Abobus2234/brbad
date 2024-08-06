@@ -1,0 +1,8 @@
+[
+    {
+        "name": "brbad-web-container",
+        "image": "$DOCKER_REGISTRY/$WEB_APP_NAME:162",
+        "cpu": 0,
+        "essential": true
+    }
+]
